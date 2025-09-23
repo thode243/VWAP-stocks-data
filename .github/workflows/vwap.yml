@@ -49,12 +49,7 @@ jobs:
           GOOGLE_CREDENTIALS_PATH: ${{ github.workspace }}/service_account.json
         run: python NSE_Option_Chainonline.py
 
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: script-logs
-          path: option_chain_updater1.log
+      
 
   code2:
     if: ${{ github.event.inputs.run_code2 == 'true' }}
