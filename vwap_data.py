@@ -8,10 +8,10 @@ from datetime import datetime
 import os
 import time
 
-#
 # -------------------- CONFIG --------------------
-SERVICE_ACCOUNT_FILE = "service_account.json"
-SHEET_ID = os.environ.get("SHEET_ID")  # read from GitHub secret
+SERVICE_ACCOUNT_FILE = "service_account.json"  # path to your service account JSON
+SHEET_ID = os.environ.get("SHEET_ID")          # GitHub secret for Google Sheet ID
+UPDATE_INTERVAL = 60                            # in seconds
 
 symbols = [
     "ADANIENT", "MARUTI", "BAJFINANCE", "EICHERMOT", "MM", "SHRIRAMFIN",
@@ -29,7 +29,7 @@ symbols = [
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(SERVICE_ACCOUNT_FILE, scope)
 client = gspread.authorize(creds)
-sheet = client.open_by_key(SHEET_ID).sheet1  # default first worksheet
+sheet = client.open_by_key(SHEET_ID).sheet1
 
 # Write headers if sheet is empty
 if len(sheet.get_all_values()) == 0:
@@ -40,48 +40,70 @@ if len(sheet.get_all_values()) == 0:
 url = "https://www.nseindia.com/api/quote-equity"
 headers = {
     "User-Agent": "Mozilla/5.0",
-    "Accept": "application/json",
-    "Referer": "https://www.nseindia.com"
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.nseindia.com/get-quotes/equity",
+    "Accept-Language": "en-US,en;q=0.9",
 }
+
 session = requests.Session()
 session.get("https://www.nseindia.com", headers=headers)  # get cookies
 
-# -------------------- FETCH DATA --------------------
-records = []
-timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+# -------------------- MAIN LOOP --------------------
+while True:
+    records = []
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-for symbol in symbols:
-    params = {"symbol": symbol, "section": "trade_info"}
-    try:
-        response = session.get(url, headers=headers, params=params, timeout=10)
-        data = response.json()
-        trade_info = data.get("marketDeptOrderBook", {}).get("tradeInfo", {})
+    for symbol in symbols:
+        params = {"symbol": symbol, "section": "trade_info"}
+        try:
+            response = session.get(url, headers=headers, params=params, timeout=10)
+            # Try parsing JSON, fallback to printing raw if fails
+            try:
+                data = response.json()
+            except Exception:
+                print(f"[{timestamp}] Failed to parse JSON for {symbol}, raw response: {response.text[:500]}")
+                continue
 
-        records.append({
-            "Timestamp": timestamp,
-            "Symbol": symbol,
-            "Prev Close": trade_info.get("previousClose"),
-            "Open": trade_info.get("open"),
-            "High": trade_info.get("intraDayHighLow", {}).get("max"),
-            "Low": trade_info.get("intraDayHighLow", {}).get("min"),
-            "VWAP": trade_info.get("vwap")
-        })
+            # Correct JSON parsing for NSE trade info
+            trade_info = data.get("priceInfo") or data.get("marketDeptOrderBook", {}).get("tradeInfo", {})
 
-    except Exception as e:
-        print(f"Error fetching {symbol}: {e}")
-        records.append({
-            "Timestamp": timestamp,
-            "Symbol": symbol,
-            "Prev Close": None,
-            "Open": None,
-            "High": None,
-            "Low": None,
-            "VWAP": None
-        })
+            prev_close = trade_info.get("previousClose")
+            open_price = trade_info.get("open")
+            high_price = trade_info.get("intraDayHighLow", {}).get("max")
+            low_price = trade_info.get("intraDayHighLow", {}).get("min")
+            vwap = trade_info.get("vwap")
 
-    time.sleep(1)  # avoid NSE blocking
+            records.append({
+                "Timestamp": timestamp,
+                "Symbol": symbol,
+                "Prev Close": prev_close,
+                "Open": open_price,
+                "High": high_price,
+                "Low": low_price,
+                "VWAP": vwap
+            })
 
-# -------------------- PUSH TO GOOGLE SHEET --------------------
-df = pd.DataFrame(records)
-set_with_dataframe(sheet, df, row=len(sheet.get_all_values())+1, include_index=False, include_column_header=False)
-print(f"{timestamp} - Data pushed successfully!")
+        except Exception as e:
+            print(f"[{timestamp}] Error fetching {symbol}: {e}")
+            records.append({
+                "Timestamp": timestamp,
+                "Symbol": symbol,
+                "Prev Close": None,
+                "Open": None,
+                "High": None,
+                "Low": None,
+                "VWAP": None
+            })
+
+        time.sleep(0.5)  # avoid NSE blocking
+
+    # Convert to DataFrame
+    df = pd.DataFrame(records)
+    print(df.head())  # check top rows in console
+
+    # Append to Google Sheet
+    start_row = len(sheet.get_all_values()) + 1
+    set_with_dataframe(sheet, df, row=start_row, include_index=False, include_column_header=False)
+    print(f"[{timestamp}] Data pushed to Google Sheet successfully!")
+
+    time.sleep(UPDATE_INTERVAL)
