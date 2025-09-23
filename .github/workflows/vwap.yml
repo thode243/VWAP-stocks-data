@@ -89,7 +89,7 @@ jobs:
           GOOGLE_CREDENTIALS_PATH: ${{ github.workspace }}/service_account.json
         run: |
           echo "⏰ Checking if market is open..."
-          python - <<'EOF'
+python - <<'EOF'
 import datetime, pytz, sys
 ist = pytz.timezone("Asia/Kolkata")
 now = datetime.datetime.now(ist).time()
