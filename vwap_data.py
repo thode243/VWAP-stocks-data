@@ -83,7 +83,8 @@ headers = {
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(SERVICE_ACCOUNT_FILE, scope)
 client = gspread.authorize(creds)
-sheet = client.open_by_key(SHEET_ID).sheet1
+# sheet = client.open_by_key(SHEET_ID).sheet1
+sheet = client.open("NSE data").worksheet("Nifty50VWAP")
 
 # Write headers if sheet is empty
 if len(sheet.get_all_values()) == 0:
