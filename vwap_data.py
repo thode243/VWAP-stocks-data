@@ -9,23 +9,76 @@ import os
 import time
 
 # -------------------- CONFIG --------------------
-SERVICE_ACCOUNT_FILE = "service_account.json"  # path to your service account JSON
-SHEET_ID = os.environ.get("SHEET_ID")          # GitHub secret for Google Sheet ID
-UPDATE_INTERVAL = 60                            # in seconds
+SERVICE_ACCOUNT_FILE = "service_account.json"   # service account JSON file (added via GitHub Actions)
+SHEET_ID = os.environ.get("SHEET_ID")           # GitHub Secret for Google Sheet ID
+UPDATE_INTERVAL = 60                            # seconds refresh interval
 
-symbols = [
-    "ADANIENT", "MARUTI", "BAJFINANCE", "EICHERMOT", "MM", "SHRIRAMFIN",
-    "JSWSTEEL", "AXISBANK", "BAJAJFINSV", "NTPC", "SBIN", "POWERGRID",
-    "INDUSINDBK", "TATAMOTORS", "DRREDDY", "TATASTEEL", "BAJAJ-AUTO", "TATACONSUM",
-    "INFY", "KOTAKBANK", "ADANIPORTS", "COALINDIA", "HINDALCO", "ICICIBANK",
-    "WIPRO", "LT", "TCS", "HDFCBANK", "HEROMOTOCO", "ONGC",
-    "BEL", "SUNPHARMA", "APOLLOHOSP", "RELIANCE", "JIOFIN", "SBILIFE",
-    "ITC", "TITAN", "HCLTECH", "CIPLA", "BHARTIARTL", "ETERNAL",
-    "HINDUNILVR", "HDFCLIFE", "ASIANPAINT", "GRASIM", "NESTLEIND", "ULTRACEMCO",
-    "TECHM", "TRENT"
-]
+# -------------------- NIFTY50 SYMBOLS --------------------
+nifty50_map = {
+    "Reliance": "RI",
+    "TCS": "TCS",
+    "HDFC Bank": "HDF01",
+    "Bharti Airtel": "BTV",
+    "ICICI Bank": "ICI02",
+    "Infosys": "IT",
+    "SBI": "SBI",
+    "HUL": "HL",
+    "Bajaj Finance": "BAF",
+    "ITC": "ITC",
+    "HCL Tech": "HCL02",
+    "Larsen": "LT",
+    "Sun Pharma": "SPI",
+    "Kotak Mahindra": "KMF",
+    "Maruti Suzuki": "MU01",
+    "M&M": "MM",
+    "UltraTech Cement": "UTC",
+    "Wipro": "W",
+    "NTPC": "NTP",
+    "Axis Bank": "UTI10",
+    "ONGC": "ONG",
+    "Bajaj Finserv": "BF04",
+    "Titan Company": "TI01",
+    "Tata Motors": "TEL",
+    "Adani Enterprises": "AE01",
+    "Power Grid": "PGC",
+    "JSW Steel": "JVS",
+    "Bajaj Auto": "BA06",
+    "Adani Ports": "MPS",
+    "Coal India": "CI29",
+    "Asian Paints": "API",
+    "Nestle": "NI",
+    "Bharat Elec": "BE03",
+    "Trent": "L",
+    "Tata Steel": "TIS",
+    "Grasim": "GI01",
+    "Tech Mahindra": "TM4",
+    "SBI Life": "SLI03",
+    "Hindalco": "H",
+    "Eicher Motors": "EM",
+    "HDFC Life": "HSL01",
+    "Cipla": "C",
+    "Britannia": "BI",
+    "Shriram Finance": "STF",
+    "BPCL": "BPC",
+    "Tata Consumer": "TT",
+    "Dr Reddys": "DRL",
+    "Apollo Hospital": "AHE",
+    "IndusInd Bank": "IIB",
+    "Hero Motocorp": "HHM"
+}
 
-# -------------------- GOOGLE SHEETS SETUP --------------------
+# -------------------- API ENDPOINTS --------------------
+ltp_url = "https://api.moneycontrol.com/mcapi/v1/stock/get-stock-price"
+vwap_url_template = "https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/{}"
+
+headers = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.moneycontrol.com",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+# -------------------- GOOGLE SHEETS AUTH --------------------
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(SERVICE_ACCOUNT_FILE, scope)
 client = gspread.authorize(creds)
@@ -33,77 +86,59 @@ sheet = client.open_by_key(SHEET_ID).sheet1
 
 # Write headers if sheet is empty
 if len(sheet.get_all_values()) == 0:
-    headers = ["Timestamp", "Symbol", "Prev Close", "Open", "High", "Low", "VWAP"]
-    sheet.append_row(headers)
-
-# -------------------- NSE SESSION --------------------
-url = "https://www.nseindia.com/api/quote-equity"
-headers = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept": "application/json, text/plain, */*",
-    "Referer": "https://www.nseindia.com/get-quotes/equity",
-    "Accept-Language": "en-US,en;q=0.9",
-}
-
-session = requests.Session()
-session.get("https://www.nseindia.com", headers=headers)  # get cookies
+    headers_row = ["Timestamp", "Company", "Symbol Code", "LTP", "% Change", "VWAP/AVGP"]
+    sheet.append_row(headers_row)
 
 # -------------------- MAIN LOOP --------------------
 while True:
-    records = []
+    results = []
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    for symbol in symbols:
-        params = {"symbol": symbol, "section": "trade_info"}
+    for name, scId in nifty50_map.items():
         try:
-            response = session.get(url, headers=headers, params=params, timeout=10)
-            # Try parsing JSON, fallback to printing raw if fails
-            try:
-                data = response.json()
-            except Exception:
-                print(f"[{timestamp}] Failed to parse JSON for {symbol}, raw response: {response.text[:500]}")
+            # LTP data
+            params = {"scIdList": scId, "scId": scId}
+            ltp_resp = requests.get(ltp_url, params=params, headers=headers, timeout=10).json()
+
+            if "data" not in ltp_resp or not ltp_resp["data"]:
+                print(f"[{timestamp}] ⚠️ No LTP for {name}")
                 continue
 
-            # Correct JSON parsing for NSE trade info
-            trade_info = data.get("priceInfo") or data.get("marketDeptOrderBook", {}).get("tradeInfo", {})
+            ltp_data = ltp_resp["data"][0]
+            ltp = ltp_data.get("lastPrice", "-")
+            change = ltp_data.get("perChange", "-")
 
-            prev_close = trade_info.get("previousClose")
-            open_price = trade_info.get("open")
-            high_price = trade_info.get("intraDayHighLow", {}).get("max")
-            low_price = trade_info.get("intraDayHighLow", {}).get("min")
-            vwap = trade_info.get("vwap")
+            # VWAP data
+            vwap = None
+            try:
+                vwap_resp = requests.get(vwap_url_template.format(scId), headers=headers, timeout=10).json()
+                if vwap_resp.get("data"):
+                    vwap = vwap_resp["data"].get("VWAP") or vwap_resp["data"].get("AVGP")
+            except Exception as e:
+                print(f"[{timestamp}] VWAP error {name}: {e}")
 
-            records.append({
+            results.append({
                 "Timestamp": timestamp,
-                "Symbol": symbol,
-                "Prev Close": prev_close,
-                "Open": open_price,
-                "High": high_price,
-                "Low": low_price,
-                "VWAP": vwap
+                "Company": name,
+                "Symbol Code": scId,
+                "LTP": ltp,
+                "% Change": change,
+                "VWAP/AVGP": vwap
             })
 
         except Exception as e:
-            print(f"[{timestamp}] Error fetching {symbol}: {e}")
-            records.append({
-                "Timestamp": timestamp,
-                "Symbol": symbol,
-                "Prev Close": None,
-                "Open": None,
-                "High": None,
-                "Low": None,
-                "VWAP": None
-            })
+            print(f"[{timestamp}] ❌ Error fetching {name}: {e}")
 
-        time.sleep(0.5)  # avoid NSE blocking
+        time.sleep(0.5)  # avoid rate limiting
 
     # Convert to DataFrame
-    df = pd.DataFrame(records)
-    print(df.head())  # check top rows in console
+    df = pd.DataFrame(results)
+    print(df.head())
 
     # Append to Google Sheet
     start_row = len(sheet.get_all_values()) + 1
     set_with_dataframe(sheet, df, row=start_row, include_index=False, include_column_header=False)
-    print(f"[{timestamp}] Data pushed to Google Sheet successfully!")
+
+    print(f"[{timestamp}] ✅ Data pushed to Google Sheet")
 
     time.sleep(UPDATE_INTERVAL)
