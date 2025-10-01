@@ -134,13 +134,19 @@ while True:
         time.sleep(0.5)  # avoid rate limiting
 
     # Convert to DataFrame
-    df = pd.DataFrame(results)
-    print(df.head())
+df = pd.DataFrame(results)
+print(df.head())
 
-    # Append to Google Sheet
-    start_row = len(sheet.get_all_values()) + 1
-    set_with_dataframe(sheet, df, row=start_row, include_index=False, include_column_header=False)
+# Overwrite old data (starting row=2, below headers)
+set_with_dataframe(
+    sheet,
+    df,
+    row=2,                     # always start at row 2
+    include_index=False,
+    include_column_header=False
+)
 
-    print(f"[{timestamp}] ✅ Data pushed to Google Sheet")
+print(f"[{timestamp}] ✅ Data refreshed in Google Sheet (overwritten old data)")
+
 
     time.sleep(UPDATE_INTERVAL)
