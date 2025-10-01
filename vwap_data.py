@@ -147,6 +147,4 @@ set_with_dataframe(
 )
 
 print(f"[{timestamp}] ✅ Data refreshed in Google Sheet (overwritten old data)")
-
-
     time.sleep(UPDATE_INTERVAL)
