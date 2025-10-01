@@ -92,10 +92,24 @@ if len(sheet.get_all_values()) == 0:
     headers_row = ["Timestamp", "Company", "Symbol Code", "LTP", "% Change", "VWAP/AVGP"]
     sheet.append_row(headers_row)
 
+from datetime import datetime, timedelta, timezone
+
 # -------------------- MAIN LOOP --------------------
 while True:
+    # Get current IST time
+    ist_offset = timedelta(hours=5, minutes=30)
+    ist_time = datetime.utcnow() + ist_offset
+    market_open = ist_time.replace(hour=9, minute=0, second=0, microsecond=0)
+    market_close = ist_time.replace(hour=15, minute=30, second=0, microsecond=0)
+
+    if ist_time < market_open or ist_time > market_close:
+        print(f"[{ist_time.strftime('%Y-%m-%d %H:%M:%S')}] ⏸ Market closed. Waiting...")
+        time.sleep(60)  # check again in 1 minute
+        continue
+
+    # --- Fetch data only during market hours ---
     results = []
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = ist_time.strftime("%Y-%m-%d %H:%M:%S")
 
     for name, scId in nifty50_map.items():
         try:
@@ -138,7 +152,7 @@ while True:
     df = pd.DataFrame(results)
     print(df.head())
 
-# Overwrite old data in assigned block (rows 12–21 for Repo2)
+    # Overwrite old data in assigned block (rows 12–21 for Repo2)
     set_with_dataframe(
         sheet,
         df,
