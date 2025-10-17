@@ -8,7 +8,7 @@ from datetime import datetime
 import os
 import time
 
-#
+
 # -------------------- CONFIG --------------------
 SERVICE_ACCOUNT_FILE = "service_account.json"   # service account JSON file (added via GitHub Actions)
 SHEET_ID = os.environ.get("SHEET_ID")           # GitHub Secret for Google Sheet ID
